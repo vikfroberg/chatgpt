@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageSquare, Loader2, ArrowLeft, X, Plus, Settings, Copy, Check } from 'lucide-react';
+import { Send, MessageSquare, Loader2, ArrowLeft, X, Plus, Settings, Copy, Check, Menu } from 'lucide-react';
 
 // Simple markdown renderer component
 const MarkdownRenderer = ({ content }) => {
@@ -38,12 +38,12 @@ const MarkdownRenderer = ({ content }) => {
         inCodeBlock = false;
         elements.push(
           <div key={`codeblock-${i}`} className="my-6 relative group">
-            <div className="bg-gray-900 rounded-lg overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2 bg-gray-800 text-gray-300 text-sm">
+            <div className="bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+              <div className="flex items-center justify-between px-4 py-2 bg-gray-200 text-gray-700 text-sm border-b border-gray-300">
                 <span>{codeBlockLang || 'code'}</span>
                 <button
                   onClick={() => copyToClipboard(codeBlockContent, codeBlockId)}
-                  className="flex items-center space-x-1 px-3 py-1.5 hover:bg-gray-700 active:bg-gray-600 rounded text-xs transition-all duration-200 transform hover:scale-105 active:scale-95"
+                  className="flex items-center space-x-1 px-3 py-1.5 hover:bg-gray-300 active:bg-gray-400 rounded text-xs transition-all duration-200"
                 >
                   {copiedCode === codeBlockId ? (
                     <>
@@ -59,7 +59,7 @@ const MarkdownRenderer = ({ content }) => {
                 </button>
               </div>
               <pre className="p-4 overflow-x-auto">
-                <code className="text-gray-100 text-sm font-mono leading-relaxed">
+                <code className="text-gray-800 text-sm font-mono leading-relaxed">
                   {codeBlockContent}
                 </code>
               </pre>
@@ -137,7 +137,7 @@ const MarkdownRenderer = ({ content }) => {
           parts.push(parseTextFormatting(beforeCode, key++));
         }
         parts.push(
-          <code key={key++} className="bg-gray-100 text-gray-900 px-1.5 py-0.5 rounded text-sm font-mono">
+          <code key={key++} className="bg-gray-200 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono">
             {codeMatch[1]}
           </code>
         );
@@ -197,7 +197,7 @@ const MarkdownRenderer = ({ content }) => {
 
 const ChatGPTUI = () => {
   const [conversations, setConversations] = useState([
-    { id: 'main', title: 'New Chat', messages: [], isMain: true }
+    { id: 'main', title: 'New Chat', messages: [], isMain: true, showInSidebar: false }
   ]);
   const [activeConversationId, setActiveConversationId] = useState('main');
   const [inputs, setInputs] = useState({ main: '' });
@@ -208,10 +208,14 @@ const ChatGPTUI = () => {
   const [tempApiKey, setTempApiKey] = useState('');
   const [showApiInput, setShowApiInput] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [apiSettings, setApiSettings] = useState({
     maxTokens: 1500,
     temperature: 0.7,
-    model: 'gpt-4o'
+    model: 'gpt-4o-mini',
+    topP: 1.0,
+    presencePenalty: 0,
+    frequencyPenalty: 0
   });
 
   // Generate chat title from first message and response
@@ -230,7 +234,7 @@ const ChatGPTUI = () => {
           messages: [
             {
               role: 'system',
-              content: 'Generate a short, descriptive title (2-6 words) for a chat conversation based on the user\'s first message and assistant\'s response. Return only the title, no quotes or extra text.'
+              content: 'Generate a short, descriptive title (2-6 words) for a chat conversation based on the user\'s message and assistant\'s response. Return only the title, no quotes or extra text.'
             },
             {
               role: 'user',
@@ -252,7 +256,17 @@ const ChatGPTUI = () => {
     
     return 'New Chat';
   };
+
+  // Check if new title is significantly better than current
+  const isTitleSignificantlyBetter = (currentTitle, newTitle) => {
+    if (currentTitle === 'New Chat') return true;
+    if (newTitle === 'New Chat') return false;
+    if (newTitle.length > currentTitle.length + 3) return true; // More descriptive
+    if (newTitle.includes(' ') && !currentTitle.includes(' ')) return true; // More specific
+    return false;
+  };
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const inputRefs = useRef({});
 
   const saveApiKey = () => {
@@ -274,8 +288,20 @@ const ChatGPTUI = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const isNearBottom = () => {
+    if (!messagesContainerRef.current) return true;
+    
+    const container = messagesContainerRef.current;
+    const threshold = 100; // pixels from bottom
+    const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - threshold;
+    return isAtBottom;
+  };
+
   useEffect(() => {
-    scrollToBottom();
+    // Only auto-scroll if user is already near the bottom
+    if (isNearBottom()) {
+      scrollToBottom();
+    }
   }, [activeConversation?.messages]);
 
   // Handle text selection
@@ -299,7 +325,7 @@ const ChatGPTUI = () => {
     }
   };
 
-  // Hide tooltip when clicking elsewhere
+  // Hide tooltip when clicking elsewhere or scrolling
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (!e.target.closest('.tooltip-container')) {
@@ -309,10 +335,23 @@ const ChatGPTUI = () => {
       if (!e.target.closest('.settings-panel') && !e.target.closest('.settings-button')) {
         setShowSettings(false);
       }
+      // Close sidebar on mobile when clicking outside
+      if (!e.target.closest('.sidebar') && !e.target.closest('.sidebar-toggle')) {
+        setSidebarOpen(false);
+      }
+    };
+
+    const handleScroll = () => {
+      setTooltip({ show: false, x: 0, y: 0 });
+      setSelectedText('');
     };
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('scroll', handleScroll, true); // Use capture to catch all scroll events
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('scroll', handleScroll, true);
+    };
   }, []);
 
   // Create detour conversation with selected text in input
@@ -334,7 +373,11 @@ const ChatGPTUI = () => {
         messages = [
           {
             role: 'system',
-            content: JSON.stringify({ type: 'lookup', term: selectedText }),
+            content: JSON.stringify({ 
+              type: 'lookup', 
+              term: selectedText,
+              settings: { model: 'gpt-4o-mini', maxTokens: 800, temperature: 0.3 }
+            }),
             isContext: true
           },
           {
@@ -351,17 +394,6 @@ const ChatGPTUI = () => {
         ];
         autoSend = true;
         break;
-      case 'focus':
-        title = `Focus: "${selectedText.substring(0, 25)}${selectedText.length > 25 ? '...' : ''}"`;
-        inputText = `"${selectedText}"`;
-        messages = [
-          {
-            role: 'system',
-            content: JSON.stringify({ type: 'focus', term: selectedText }),
-            isContext: true
-          }
-        ];
-        break;
       case 'explore':
       default:
         title = `Explore: "${selectedText.substring(0, 25)}${selectedText.length > 25 ? '...' : ''}"`;
@@ -374,7 +406,11 @@ const ChatGPTUI = () => {
         messages = [
           {
             role: 'system',
-            content: JSON.stringify({ type: 'explore', term: selectedText }),
+            content: JSON.stringify({ 
+              type: 'explore', 
+              term: selectedText,
+              settings: { model: 'gpt-4o', maxTokens: 3000, temperature: 0.7 }
+            }),
             isContext: true
           },
           {
@@ -398,7 +434,8 @@ const ChatGPTUI = () => {
       messages,
       parentId: activeConversationId,
       isMain: false,
-      type
+      type,
+      showInSidebar: true
     };
 
     setConversations(prev => [...prev, newConversation]);
@@ -520,6 +557,7 @@ const ChatGPTUI = () => {
     }
 
     let systemPrompt = "You are ChatGPT, a helpful AI assistant.";
+    let requestSettings = { ...apiSettings };
     
     if (!conversation.isMain) {
       const contextMessage = conversation.messages.find(m => m.isContext);
@@ -531,17 +569,19 @@ const ChatGPTUI = () => {
         contextData = { type: 'explore', term: '' };
       }
 
-      const { type } = contextData;
+      const { type, settings } = contextData;
+      
+      // Use detour-specific settings if available
+      if (settings) {
+        requestSettings = { ...requestSettings, ...settings };
+      }
 
       switch (type) {
         case 'lookup':
-          systemPrompt = `You are a helpful dictionary and reference assistant with access to the conversation context. When asked about terms, provide comprehensive definitions including etymology, pronunciation guides, usage examples, and related terms. Use the previous conversation context to give more relevant and contextualized explanations. Focus on being educational and thorough like a high-quality dictionary or encyclopedia, but tailor your explanation to fit the context of the ongoing discussion.`;
-          break;
-        case 'focus':
-          systemPrompt = `You are a focused AI assistant. The user has selected a specific topic or phrase to discuss in isolation. Provide detailed, focused analysis of just this topic without referencing other conversations or broader context unless directly relevant to understanding the selected topic.`;
+          systemPrompt = `You are a helpful dictionary and reference assistant with access to the conversation context. When asked about terms, provide comprehensive but concise definitions including etymology, pronunciation guides, usage examples, and related terms. Use the previous conversation context to give more relevant and contextualized explanations. Focus on being educational and thorough like a high-quality dictionary or encyclopedia, but keep responses focused and not too lengthy.`;
           break;
         case 'explore':
-          systemPrompt = `You are ChatGPT continuing a previous conversation. The user has selected a specific part of our previous discussion to explore further. You have access to the previous conversation context and should reference it when relevant to provide deeper, more connected insights.`;
+          systemPrompt = `You are ChatGPT continuing a previous conversation. The user has selected a specific part of our previous discussion to explore further. You have access to the previous conversation context and should reference it when relevant to provide deeper, more connected insights. Feel free to be thorough and expansive in your analysis.`;
           break;
       }
     }
@@ -568,10 +608,13 @@ const ChatGPTUI = () => {
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: apiSettings.model,
+          model: requestSettings.model,
           messages: apiMessages,
-          max_tokens: apiSettings.maxTokens,
-          temperature: apiSettings.temperature,
+          max_tokens: requestSettings.maxTokens,
+          temperature: requestSettings.temperature,
+          top_p: requestSettings.topP,
+          presence_penalty: requestSettings.presencePenalty,
+          frequency_penalty: requestSettings.frequencyPenalty,
           stream: true
         })
       });
@@ -641,7 +684,6 @@ const ChatGPTUI = () => {
     
     const conversation = conversations.find(c => c.id === activeConversationId);
     const userMessage = { role: 'user', content: currentInput.trim() };
-    const isFirstMessage = conversation.messages.filter(m => !m.isContext && !m.isContextSeparator).length === 0;
     
     // Add user message
     setConversations(prev => prev.map(c => 
@@ -702,14 +744,25 @@ const ChatGPTUI = () => {
           : c
       ));
 
-      // Generate and update chat title if this is the first message
-      if (isFirstMessage && conversation.isMain) {
+      // Always try to generate/improve chat title for main conversations
+      if (conversation.isMain) {
         const newTitle = await generateChatTitle(messageContent, fullResponse);
-        setConversations(prev => prev.map(c => 
-          c.id === activeConversationId 
-            ? { ...c, title: newTitle }
-            : c
-        ));
+        const currentTitle = conversation.title;
+        
+        if (isTitleSignificantlyBetter(currentTitle, newTitle)) {
+          setConversations(prev => prev.map(c => 
+            c.id === activeConversationId 
+              ? { ...c, title: newTitle, showInSidebar: true }
+              : c
+          ));
+        } else if (currentTitle === 'New Chat') {
+          // Always show in sidebar after first interaction, even if title isn't great
+          setConversations(prev => prev.map(c => 
+            c.id === activeConversationId 
+              ? { ...c, showInSidebar: true }
+              : c
+          ));
+        }
       }
     } catch (error) {
       console.error('Error:', error);
@@ -779,7 +832,8 @@ const ChatGPTUI = () => {
       id: newConversationId,
       title: 'New Chat',
       messages: [],
-      isMain: true
+      isMain: true,
+      showInSidebar: false // Don't show until we have a proper title
     };
     setConversations(prev => [...prev, newConversation]);
     setInputs(prev => ({ ...prev, [newConversationId]: '' }));
@@ -787,14 +841,24 @@ const ChatGPTUI = () => {
   };
 
   return (
-    <div className="flex h-screen bg-white">
-      {/* Monochrome Sidebar */}
-      <div className="w-64 bg-gray-900 text-white flex flex-col">
+    <div className="flex h-screen bg-white relative">
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Responsive Sidebar */}
+      <div className={`sidebar fixed md:relative inset-y-0 left-0 z-50 w-64 bg-gray-100 text-gray-900 flex flex-col border-r border-gray-300 transform transition-transform duration-300 ease-in-out ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
         {/* Header */}
-        <div className="p-4 border-b border-gray-700">
+        <div className="p-3 md:p-4 border-b border-gray-300">
           <button
             onClick={newChat}
-            className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 bg-gray-800 hover:bg-gray-700 active:bg-gray-600 border border-gray-600 hover:border-gray-500 rounded-lg transition-all duration-200 text-sm font-medium transform hover:scale-105 active:scale-95"
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 bg-white hover:bg-gray-50 active:bg-gray-100 border border-gray-300 hover:border-gray-400 rounded-lg transition-all duration-200 text-sm font-medium text-gray-900 touch-manipulation"
           >
             <Plus className="w-4 h-4" />
             <span>New chat</span>
@@ -803,21 +867,21 @@ const ChatGPTUI = () => {
 
         {/* API Key Section */}
         {showApiInput && (
-          <div className="p-4 border-b border-gray-700 bg-gray-800">
+          <div className="p-3 md:p-4 border-b border-gray-300 bg-gray-100">
             <div className="space-y-3">
-              <p className="text-sm font-medium text-white">API Key Required</p>
+              <p className="text-sm font-medium text-gray-900">API Key Required</p>
               <input
                 type="password"
                 placeholder="sk-..."
                 value={tempApiKey}
                 onChange={(e) => setTempApiKey(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && saveApiKey()}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white focus:border-transparent"
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-500 outline-none focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent"
               />
               <button
                 onClick={saveApiKey}
                 disabled={!tempApiKey.trim()}
-                className="w-full px-3 py-2 bg-white text-gray-900 hover:bg-gray-100 active:bg-gray-200 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-all duration-200 transform hover:scale-105 active:scale-95"
+                className="w-full px-3 py-2 bg-gray-900 text-white hover:bg-gray-800 active:bg-gray-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-all duration-200 touch-manipulation"
               >
                 Save API Key
               </button>
@@ -827,37 +891,44 @@ const ChatGPTUI = () => {
 
         {/* API Key Status */}
         {apiKey.trim() && !showApiInput && (
-          <div className="p-4 border-b border-gray-700">
-            <button
-              onClick={changeApiKey}
-              className="w-full flex items-center justify-center space-x-2 px-3 py-2 bg-gray-800 border border-gray-600 hover:bg-gray-700 hover:border-gray-500 active:bg-gray-600 rounded-lg text-white text-sm font-medium transition-all duration-200 transform hover:scale-105 active:scale-95"
-            >
-              <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-              <span>API Connected</span>
-            </button>
+          <div className="p-3 md:p-4 border-b border-gray-300 bg-gray-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-gray-900 text-sm font-medium">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>API Connected</span>
+              </div>
+              <button
+                onClick={changeApiKey}
+                className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-200 active:bg-gray-300 rounded transition-all duration-200 touch-manipulation"
+              >
+                Edit
+              </button>
+            </div>
           </div>
         )}
 
         {/* Conversations */}
-        <div className="flex-1 overflow-y-auto p-2">
-          {conversations.map(conversation => (
+        <div className="flex-1 overflow-y-auto p-2 bg-gray-100">
+          {conversations.filter(c => c.showInSidebar !== false).map(conversation => (
             <div
               key={conversation.id}
-              className={`group relative mb-1 cursor-pointer rounded-lg transition-all duration-200 transform hover:scale-105 ${
+              className={`group relative mb-1 cursor-pointer rounded-lg transition-all duration-200 ${
                 activeConversationId === conversation.id 
-                  ? 'bg-gray-700 shadow-lg' 
-                  : 'hover:bg-gray-800'
+                  ? 'bg-gray-200' 
+                  : 'hover:bg-gray-50'
               }`}
-              onClick={() => setActiveConversationId(conversation.id)}
+              onClick={() => {
+                setActiveConversationId(conversation.id);
+                setSidebarOpen(false); // Close sidebar on mobile when selecting conversation
+              }}
             >
               <div className="flex items-center px-3 py-2.5">
-                <MessageSquare className="w-4 h-4 mr-3 text-gray-400 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate font-medium">
+                  <p className="text-sm text-gray-900 truncate font-medium">
                     {conversation.title}
                   </p>
                   {conversation.messages.filter(m => !m.isContext && !m.isContextSeparator && m.role !== 'system').length > 0 && (
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <p className="text-xs text-gray-600 mt-0.5">
                       {conversation.messages.filter(m => !m.isContext && !m.isContextSeparator && m.role !== 'system').length} messages
                     </p>
                   )}
@@ -868,9 +939,9 @@ const ChatGPTUI = () => {
                       e.stopPropagation();
                       closeDetourConversation(conversation.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-600 active:bg-gray-500 rounded transition-all duration-200 transform hover:scale-110 active:scale-95"
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 active:bg-gray-300 rounded transition-all duration-200 touch-manipulation"
                   >
-                    <X className="w-3 h-3 text-gray-400 hover:text-white" />
+                    <X className="w-3 h-3 text-gray-600 hover:text-gray-900" />
                   </button>
                 )}
               </div>
@@ -880,40 +951,42 @@ const ChatGPTUI = () => {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
+        <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-gray-200 bg-white">
           <div className="flex items-center space-x-3">
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="sidebar-toggle md:hidden p-1.5 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-200 touch-manipulation"
+            >
+              <Menu className="w-5 h-5 text-gray-600" />
+            </button>
+            
             {!activeConversation?.isMain && (
               <button
                 onClick={goBackToParent}
-                className="p-1.5 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-200 transform hover:scale-110 active:scale-95"
+                className="p-1.5 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-200 touch-manipulation"
               >
                 <ArrowLeft className="w-4 h-4 text-gray-600" />
               </button>
             )}
-            <h1 className="text-lg font-semibold text-gray-900">
+            <h1 className="text-lg md:text-xl font-semibold text-gray-900 truncate">
               {activeConversation?.title || 'ChatGPT'}
             </h1>
           </div>
-          <button
-            onClick={clearChat}
-            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-all duration-200 transform hover:scale-105 active:scale-95"
-          >
-            Clear
-          </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto" onMouseUp={handleTextSelection}>
+        <div className="flex-1 overflow-y-auto" onMouseUp={handleTextSelection} ref={messagesContainerRef}>
           {activeConversation?.messages.filter(m => !m.isContext && !m.isContextSeparator && m.role !== 'system').length === 0 && (
             <div className="flex items-center justify-center h-full px-4">
               <div className="text-center max-w-md">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <MessageSquare className="w-8 h-8 text-gray-400" />
+                <div className="w-12 h-12 md:w-16 md:h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <MessageSquare className="w-6 h-6 md:w-8 md:h-8 text-gray-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">How can I help you today?</h3>
-                <p className="text-gray-500">
+                <h3 className="text-lg md:text-xl font-semibold text-gray-900 mb-2">How can I help you today?</h3>
+                <p className="text-sm md:text-base text-gray-500">
                   {!apiKey.trim() ? "Save your API key to get started." : "Start a new conversation below."}
                 </p>
               </div>
@@ -932,9 +1005,9 @@ const ChatGPTUI = () => {
             }
 
             return (
-              <div key={message.id || index} className="group px-4 py-6 hover:bg-gray-50 transition-all duration-200">
-                <div className="max-w-3xl mx-auto flex space-x-4">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-medium transition-all duration-200 ${
+              <div key={message.id || index} className="group px-3 md:px-4 py-4 md:py-6 hover:bg-gray-50 transition-all duration-200">
+                <div className="max-w-3xl mx-auto flex space-x-3 md:space-x-4">
+                  <div className={`w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs md:text-sm font-medium transition-all duration-200 ${
                     message.role === 'assistant' ? 'bg-gray-900' : 'bg-gray-700'
                   }`}>
                     {message.role === 'assistant' ? 'AI' : 'You'}
@@ -944,7 +1017,7 @@ const ChatGPTUI = () => {
                       <MarkdownRenderer content={message.content} isStreaming={message.isStreaming} />
                     ) : (
                       <div className="prose prose-gray max-w-none">
-                        <p className="whitespace-pre-wrap text-gray-900 leading-relaxed select-text">
+                        <p className="whitespace-pre-wrap text-gray-900 leading-relaxed select-text text-sm md:text-base">
                           {message.content}
                         </p>
                       </div>
@@ -956,9 +1029,9 @@ const ChatGPTUI = () => {
           })}
 
           {isLoading && activeConversation?.messages.filter(m => !m.isContext && !m.isStreaming).length === activeConversation?.messages.filter(m => !m.isContext).length && (
-            <div className="group px-4 py-6 bg-gray-50">
-              <div className="max-w-3xl mx-auto flex space-x-4">
-                <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0 text-white text-sm font-medium">
+            <div className="group px-3 md:px-4 py-4 md:py-6 bg-gray-50">
+              <div className="max-w-3xl mx-auto flex space-x-3 md:space-x-4">
+                <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-900 flex items-center justify-center flex-shrink-0 text-white text-xs md:text-sm font-medium">
                   AI
                 </div>
                 <div className="flex-1 min-w-0">
@@ -975,7 +1048,7 @@ const ChatGPTUI = () => {
         </div>
 
         {/* Input */}
-        <div className="border-t border-gray-200 p-4 bg-white">
+        <div className="border-t border-gray-200 p-3 md:p-4 bg-white">
           <div className="max-w-3xl mx-auto">
             <div className="relative">
               <textarea
@@ -984,14 +1057,14 @@ const ChatGPTUI = () => {
                 onChange={(e) => handleInputChange(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Message ChatGPT..."
-                className="w-full px-4 py-3 pr-24 border border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-500 focus:border-transparent resize-none max-h-32 overflow-y-auto text-gray-900 placeholder-gray-500 transition-all duration-200"
+                className="w-full px-3 md:px-4 py-3 pr-20 md:pr-24 border border-gray-300 rounded-xl outline-none focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent resize-none max-h-32 overflow-y-auto text-gray-900 placeholder-gray-500 transition-all duration-200 text-sm md:text-base"
                 rows="2"
-                style={{ minHeight: '80px' }}
+                style={{ minHeight: '60px' }}
               />
-              <div className="absolute right-3 bottom-3 flex items-center space-x-2">
+              <div className="absolute right-2 md:right-3 bottom-3 flex items-center space-x-1 md:space-x-2">
                 <button
                   onClick={() => setShowSettings(!showSettings)}
-                  className={`settings-button p-2 rounded-lg transition-all duration-200 transform hover:scale-110 active:scale-95 ${
+                  className={`settings-button p-1.5 md:p-2 rounded-lg transition-all duration-200 touch-manipulation ${
                     showSettings 
                       ? 'bg-gray-900 text-white shadow-lg' 
                       : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 active:bg-gray-200'
@@ -1003,7 +1076,7 @@ const ChatGPTUI = () => {
                 <button
                   onClick={sendMessage}
                   disabled={!currentInput.trim() || !apiKey.trim() || isLoading}
-                  className="p-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 active:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-110 active:scale-95 shadow-lg hover:shadow-xl"
+                  className="p-1.5 md:p-2 bg-gray-900 text-white rounded-lg hover:bg-gray-700 active:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl touch-manipulation"
                 >
                   {isLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1016,12 +1089,12 @@ const ChatGPTUI = () => {
 
             {/* Enhanced Settings Panel */}
             {showSettings && (
-              <div className="settings-panel mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-xl animate-in slide-in-from-bottom-2 duration-200">
+              <div className="settings-panel mt-4 p-3 md:p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-xl animate-in slide-in-from-bottom-2 duration-200">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-900">API Settings</h3>
                   <button
                     onClick={() => setShowSettings(false)}
-                    className="p-1 hover:bg-gray-200 active:bg-gray-300 rounded-lg transition-all duration-200 transform hover:scale-110 active:scale-95"
+                    className="p-1 hover:bg-gray-200 active:bg-gray-300 rounded-lg transition-all duration-200 touch-manipulation"
                     title="Close settings"
                   >
                     <X className="w-4 h-4 text-gray-500" />
@@ -1033,14 +1106,14 @@ const ChatGPTUI = () => {
                     <select
                       value={apiSettings.model}
                       onChange={(e) => setApiSettings(prev => ({ ...prev, model: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 bg-white transition-all duration-200"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:outline-none focus:ring-2 focus:ring-gray-400 bg-white transition-all duration-200"
                     >
-                      <option value="gpt-4o">GPT-4o (Latest)</option>
-                      <option value="gpt-4">GPT-4</option>
-                      <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                      <option value="gpt-4o-mini">GPT-4o Mini (Fastest)</option>
+                      <option value="gpt-4o">GPT-4o (Balanced)</option>
+                      <option value="gpt-4-turbo">GPT-4 Turbo (Most Capable)</option>
                     </select>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-2">
                         Max Tokens: <span className="font-semibold">{apiSettings.maxTokens}</span>
@@ -1070,9 +1143,54 @@ const ChatGPTUI = () => {
                       />
                     </div>
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-2">
+                        Top P: <span className="font-semibold">{apiSettings.topP}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={apiSettings.topP}
+                        onChange={(e) => setApiSettings(prev => ({ ...prev, topP: parseFloat(e.target.value) }))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-2">
+                        Presence: <span className="font-semibold">{apiSettings.presencePenalty}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="-2"
+                        max="2"
+                        step="0.1"
+                        value={apiSettings.presencePenalty}
+                        onChange={(e) => setApiSettings(prev => ({ ...prev, presencePenalty: parseFloat(e.target.value) }))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-2">
+                        Frequency: <span className="font-semibold">{apiSettings.frequencyPenalty}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="-2"
+                        max="2"
+                        step="0.1"
+                        value={apiSettings.frequencyPenalty}
+                        onChange={(e) => setApiSettings(prev => ({ ...prev, frequencyPenalty: parseFloat(e.target.value) }))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                    </div>
+                  </div>
                   <div className="text-xs text-gray-500 bg-white p-3 rounded border">
                     <p><strong>Temperature:</strong> Higher values (1.0+) make output more creative, lower values (0.1-0.5) make it more focused.</p>
-                    <p className="mt-1"><strong>Max Tokens:</strong> Maximum length of the response. Higher values allow longer responses.</p>
+                    <p className="mt-1"><strong>Top P:</strong> Alternative to temperature. Lower values (0.1-0.5) make responses more focused.</p>
+                    <p className="mt-1"><strong>Presence/Frequency:</strong> Penalties reduce repetition. Positive values discourage, negative encourage repetition.</p>
                   </div>
                 </div>
               </div>
@@ -1091,21 +1209,15 @@ const ChatGPTUI = () => {
             <div className="flex">
               <button
                 onClick={() => createDetourConversation('lookup')}
-                className="px-4 py-2 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-all duration-200 border-r border-gray-700 transform hover:scale-105 active:scale-95"
+                className="px-3 md:px-4 py-2 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-all duration-200 border-r border-gray-700 touch-manipulation"
               >
                 Look up
               </button>
               <button
                 onClick={() => createDetourConversation('explore')}
-                className="px-4 py-2 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-all duration-200 border-r border-gray-700 transform hover:scale-105 active:scale-95"
+                className="px-3 md:px-4 py-2 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-all duration-200 touch-manipulation"
               >
                 Explore
-              </button>
-              <button
-                onClick={() => createDetourConversation('focus')}
-                className="px-4 py-2 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-all duration-200 transform hover:scale-105 active:scale-95"
-              >
-                Focus
               </button>
             </div>
             <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
